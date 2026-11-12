@@ -7,7 +7,7 @@ possible to use one of each as separate zones:
 
 ```
 [ESP32-S3 beacon: zone 1-1] --\
-                                +--BLE iBeacon--> [phone: Staff tab] --MQTT--> [broker] --> [Hub tab]
+                                +--BLE iBeacon--> [phone: Staff tab] -- FAST API --> [SERVER]
 [ESP32-C6 beacon: zone 1-2] --/
 ```
 
