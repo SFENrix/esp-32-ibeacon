@@ -1,55 +1,91 @@
-# Zone Beacon (ESP32-S3), test build
+# ESP32 iBeacon
 
-Temporary setup while there's only one ESP32:
+PlatformIO firmware for broadcasting an Apple iBeacon from either an
+ESP32-S3 or ESP32-C6. Each board advertises the same UUID and uses its
+major/minor values to identify a zone. The configured defaults make it
+possible to use one of each as separate zones:
 
 ```
-[ESP32-S3 beacon] --BLE iBeacon--> [iPhone: Staff tab] --MQTT--> [broker] --> [iPad/iPhone: Hub tab]
-```
-The ESP32-S3 hub firmware (`zone-hub`) still works unchanged. When you get a second board, flash it as the hub and it receives the same messages.
-
-## 1. Flash it
-1. Open this folder in VS Code with PlatformIO, then **Upload** and **Monitor**.
-2. The first build downloads platform v7.1.3 (Arduino core 2.0.17). This is pinned deliberately; leave it as is.
-3. You should see:
-```
-=== Zone Beacon (ESP32-S3) ===
-Broadcasting : ON
-UUID         : BEE80189-496A-4F70-8BDA-C68CAAF94EE2
-Zone         : major 1, minor 1
-TX power     : 0 dBm (radio reports 0 dBm)
+[ESP32-S3 beacon: zone 1-1] --\
+                                +--BLE iBeacon--> [phone: Staff tab] --MQTT--> [broker] --> [Hub tab]
+[ESP32-C6 beacon: zone 1-2] --/
 ```
 
-**Quick check without the app:** install **nRF Connect** (free) on the iPhone and scan. iOS hides iBeacon contents from normal Bluetooth scanners, so you may only see an unnamed device or nothing at all. That's expected, and the app's Staff tab is the real check. On Android, nRF Connect shows it as an iBeacon with the UUID.
+The beacon firmware only broadcasts BLE advertisements; the phone app reports
+zone events to the broker. The ESP32 hub firmware can continue to receive the
+same messages unchanged.
 
-## 2. Live tuning (type in the Serial Monitor)
+## Boards and PlatformIO environments
+
+| Environment | Board | Default zone |
+|---|---|---|
+| `beacon_s3` | ESP32-S3 DevKit (`esp32-s3-devkitc-1`) | major `1`, minor `1` |
+| `beacon_c6` | ESP32-C6 DevKit (`esp32-c6-devkitc-1`) | major `1`, minor `2` |
+
+The project uses the PlatformIO `espressif32` platform pinned to `8.0.0` and
+the Arduino framework. The defaults build both environments. To build or
+upload a specific board, select its environment in PlatformIO or use:
+
+```sh
+pio run -e beacon_s3
+pio run -e beacon_c6
+pio run -e beacon_s3 -t upload
+pio run -e beacon_c6 -t upload
+```
+
+Open the project in VS Code with the PlatformIO extension. Connect the
+corresponding board, select its environment, then use **Upload** and
+**Monitor**. The serial monitor uses 115200 baud. Firmware logs are sent to
+both the native USB serial port and UART.
+
+## Beacon settings
+
+Both boards advertise UUID `BEE80189-496A-4F70-8BDA-C68CAAF94EE2`. On first
+boot, their default zones are set by the selected PlatformIO environment
+(table above). Settings changed from the serial monitor are saved in flash
+and survive a reboot; `defaults` restores the defaults for that environment.
+
+Type `help` in the serial monitor to list commands:
+
 | Command | What it does |
 |---|---|
-| `status` | show settings |
-| `tx -12` | transmit power in dBm (-24 to 21, 3 dB steps) |
-| `int 300` | broadcast interval in ms (20 to 10240) |
-| `zone 1 2` | change the zone ID, to pretend you walked into another room |
-| `off` / `on` | stop/start broadcasting, to test "exit" without walking away |
-| `mp -62` | measured power at 1 m (see calibration below) |
-| `defaults` | back to `config.h` values |
+| `status` | Show zone, broadcast state, requested and read-back TX power, interval, and measured power |
+| `tx -12` | Set transmit power; usable steps are 3 dB apart |
+| `int 300` | Set broadcast interval in milliseconds (20 to 10240) |
+| `zone 1 2` | Change the major/minor zone ID |
+| `mp -62` | Set measured power at 1 m |
+| `off` / `on` | Stop or start broadcasting |
+| `defaults` | Restore the selected environment's default settings |
 
-Settings are saved to flash and survive a reboot.
+The available transmit power depends on the chip: ESP32-S3 supports -24 to
++20 dBm, and ESP32-C6 supports -15 to +20 dBm. Requested values are rounded
+to a supported 3 dB step, and values below a chip's minimum use its lowest
+step. Use `status` to check the radio's reported power.
 
-## 3. Feasibility tests worth running
-1. **Range per power level.** At `tx 0`, `tx -12` and `tx 9`, walk away until the Staff tab stops seeing the beacon. Note the distance and RSSI.
-2. **Wall bleed.** Stand in the next room. If the phone still detects the zone, lower `tx`. This is the main tuning knob for keeping zones separate.
-3. **Enter delay.** Phone locked in your pocket, beacon `off` → `on`. Time how long until the enter event shows on the Hub tab.
-4. **Exit delay.** Beacon `on` → `off`. iOS normally waits a while before declaring "exit" (often around 30 s in public reports). Measure your actual figure.
-5. **Interval vs. speed.** Repeat test 3 at `int 100` and `int 1000`.
+## Testing and calibration
 
-## 4. Calibrate measured power
-Hold the iPhone exactly 1 m from the beacon with the Staff tab open. Wait about 30 s and read the average RSSI, then set it with `mp <value>`, e.g. `mp -63`. This only affects iOS's distance estimate, not detection.
+- **Check advertisements:** nRF Connect can scan for the beacon. iOS may hide
+  iBeacon contents from ordinary Bluetooth scanners; the app's Staff tab is
+  the intended detection check. Android scanners may show the iBeacon UUID.
+- **Check range and wall bleed:** Compare reception at different `tx` levels
+  and in neighboring rooms. Lower transmit power if a phone continues to
+  detect a beacon across a zone boundary.
+- **Check enter/exit behavior:** With the phone locked, use `off` and `on` to
+  simulate leaving and entering a zone, and measure event delays in the app.
+- **Check interval:** Compare detection behavior at different `int` settings.
+- **Calibrate measured power:** Hold the phone 1 m from the beacon with the
+  Staff tab open, wait about 30 seconds, then set `mp` to the average RSSI
+  (for example, `mp -63`). This affects the iOS distance estimate, not beacon
+  detection.
 
 ## Shared contract
+
 | Item | Value |
 |---|---|
 | UUID | `BEE80189-496A-4F70-8BDA-C68CAAF94EE2` |
-| Test zone | major `1`, minor `1` |
+| ESP32-S3 default zone | major `1`, minor `1` |
+| ESP32-C6 default zone | major `1`, minor `2` |
 
-## Notes
-- The datasheet's BLE power range for the ESP32-S3-WROOM-1 is -25 to +20 dBm (Table 20). The SDK's top step is labelled +21 dBm; treat it as the module's maximum.
-- Compile-checked on Arduino-ESP32 2.0.17 for the ESP32-S3 (69% flash). Not yet tested on a physical board.
+The PlatformIO project is configured for both board targets. Confirm builds
+and radio behavior with the specific board and toolchain being used; firmware
+configuration alone does not establish physical-board testing.
